@@ -1,0 +1,128 @@
+/* 
+ *LS1043ARDB RCW for SerDes Protocol 0x4555
+ *
+ * 15G configuration -- 2 RGMII + 1 QSGMII
+ *
+ * Frequencies:
+ *
+ * Sys Clock: 100 MHz
+ * DDR_Refclock: 100 MHz
+ *
+ * Core		-- 1000 MHz (Mul 16)
+ * Platform	-- 400 MHz (Mul 4)
+ * DDR		-- 1300 MT/s (Mul 16)
+ * FMan		-- 500 MHz (CGA1 /3)
+ * XFI		-- 156.25 MHz (10.3125G)
+ * QSGMII	-- 100 MHz (5G)
+ * PCIE		-- 100 MHz (5G)
+ * eSDHC	-- 1000 MHz (CGA2 /1)
+ *
+ * Serdes Lanes vs Slot information
+ * A SGMII  : 
+ * B SGMII  : 
+ * C PCIe2  : 
+ * D SATA   :
+ *
+ * Serdes configuration
+ * SRDS_PRTCL_S1	: 0x4555
+ * SRDS_PLL_REF_CLK_SEL_S1 :
+ * SerDes 1, PLL1 : 0 - 100MHz for SGMII and PCIe
+ * SRDS_DIV_PEX		: 00 Can train up to a max rate of 5G
+ *
+ * DDR clock:
+ * DDR_REFCLK_SEL : 1 - DDRCLK pin provides the reference clock to the DDR PLL
+ *
+ */
+
+#include <ls1043a.rcwi>
+
+SYS_PLL_RAT=4
+MEM_PLL_RAT=13
+CGA_PLL1_RAT=10
+CGA_PLL2_RAT=10
+C1_PLL_SEL=0
+SRDS_PRTCL_S1=17749
+FM1_MAC_RAT=1
+SRDS_PLL_REF_CLK_SEL_S1=0
+SRDS_PLL_PD_S1=1
+SRDS_DIV_PEX=0
+DDR_REFCLK_SEL=0
+DDR_FDBK_MULT=2
+PBI_SRC=4
+IFC_MODE=68
+HWA_CGA_M1_CLK_SEL=6
+DRAM_LAT=1
+SYS_PLL_SPD=1
+UART_BASE=4
+ASLEEP=1
+RTC=1
+SDHC_BASE=0
+IRQ_OUT=1
+IRQ_BASE=511
+SPI_BASE=1
+IFC_GRP_A_EXT=1
+IFC_GRP_D_EXT=0
+IFC_GRP_E1_EXT=0
+IFC_GRP_F_EXT=1
+IFC_GRP_E1_BASE=1
+IFC_GRP_D_BASE=1
+IFC_GRP_A_BASE=1
+EM2=1
+TVDD_VSEL=1
+DVDD_VSEL=2
+EVDD_VSEL=0
+IIC2_EXT=2
+SYSCLK_FREQ=600
+HWA_CGA_M2_CLK_SEL=1
+
+
+.pbi
+// QSPI flash clock
+write 0x57015c, 0x40100000
+write 0x570600, 0x00000000
+write 0x570604, 0x40100000
+.end
+
+
+
+#include <serdes_sata.rcw>
+
+
+/*
+ * PBI Commands for LS1043AQDS and LS1043ARDB
+ */
+.pbi
+write 0x570178, 0x0000e010
+write 0x180000, 0x00000008
+.end
+
+/*
+ * PBI Commands for LS1043AQDS and LS1043ARDB
+ */
+.pbi
+write 0x570418, 0x0000009c
+write 0x57041c, 0x0000009c
+write 0x570420, 0x0000009c
+.end
+
+/*
+ * PBI Commands for LS1043AQDS and LS1043ARDB
+ * DCSR MBIST register: 0x2200_8040
+ */
+.pbi
+write 0xee00c0, 0x00004400
+write 0x570158, 0x00002200
+awrite 0x8040, 0x00000001
+.end
+
+/*
+ * Clear SerDes RxBoost on lane D
+ */
+.pbi
+write 0xea08dc, 0x00502880
+.end
+
+.pbi
+write 0x550000, 0x000f400c
+.end
+

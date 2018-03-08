@@ -1,0 +1,9 @@
+# minimal additional packages list
+
+additional_packages_list="apt git gcc vim ethtool wget ftp make makedev
+ build-essential gdb u-boot-tools device-tree-compiler python python-dev
+ zip binutils-dev autoconf automake"
+
+extrinsic_packages_list=""
+
+source_packages_list=""

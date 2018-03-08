@@ -1,0 +1,309 @@
+#!/bin/bash
+
+# BSD LICENSE
+#
+# Copyright 2017 NXP
+#
+#
+# Redistribution and use in source and binary forms, with or without
+# modification, are permitted provided that the following conditions
+# are met:
+#
+#   * Redistributions of source code must retain the above copyright
+#     notice, this list of conditions and the following disclaimer.
+#   * Redistributions in binary form must reproduce the above copyright
+#     notice, this list of conditions and the following disclaimer in
+#     the documentation and/or other materials provided with the
+#     distribution.
+#   * Neither the name of NXP nor the names of its
+#     contributors may be used to endorse or promote products derived
+#     from this software without specific prior written permission.
+#
+# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+# "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+# LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
+# A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
+# OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+# SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
+# LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+# DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+# THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+# (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+# OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+#
+# Author: Shengzhou Liu <shengzhou.liu@nxp.com>
+#
+# a utility to generate custom aarch64/armhf/x86 ubutnu userland with
+# configurable packages and proprietary components.
+#
+
+set -e
+
+ARCH=`uname -m`
+
+usage() {
+    echo "usage: $0 <arch> <distro_codename> [ <package-list> ]"
+    echo "e.g. $0 arm64 xenial"
+    echo "     $0 armhf xenial"
+    echo "     $0 amd64 zesty"
+    exit
+}
+
+if [ $# -lt 2 ]; then
+    usage
+fi
+
+
+gen_distrorfs_firststage() {
+    if [ -z "$DISTROTYPE" ]; then
+	DISTROTYPE=ubuntu
+    fi
+    if [ $1 = armhf ]; then
+	tarch=arm32
+    else
+	tarch=$1
+    fi
+    rootfsdir=${DISTROTYPE}_$2_${tarch}_rootfs.d
+    if [ -f $TOPDIR/build/images/$rootfsdir/usr/aptpkg/.firststagedone ]; then
+	echo build/images/$rootfsdir firststage exist!
+	return
+    fi
+    if [ -f /usr/aptpkg/.firststagedone ] && [ ! -f /proc/cpuinfo ]; then
+        return
+    fi
+    if [ ! -d build/images/$rootfsdir/usr/bin ]; then
+        mkdir -p build/images/$rootfsdir/usr/bin
+    fi
+    if [ ! -d build/images/$rootfsdir/lib/modules ]; then
+	mkdir -p build/images/$rootfsdir/lib/modules
+    fi
+
+    for pkg in binfmt-support qemu-system-common qemu-user-static debootstrap; do
+	if ! dpkg-query -l $pkg | grep ii 1>/dev/null; then
+	    echo installing $pkg
+	    sudo apt-get -y install $pkg
+        fi
+    done
+
+    if [ $1 = arm64 ]; then
+	tgtarch=aarch64
+    elif [ $1 = armhf ]; then
+	tgtarch=arm
+    fi
+
+    if [ ! -f /usr/sbin/update-binfmts ]; then
+	echo update-binfmts not found
+	exit 1
+    fi
+
+    if update-binfmts --display qemu-$tgtarch | grep disabled 1>/dev/null; then
+	update-binfmts --enable qemu-$tgtarch
+	if update-binfmts --display qemu-$tgtarch | grep disabled; then
+	    echo enable qemu-$tgtarch failed
+	    exit 1
+	else
+	    echo enable qemu-$tgtarch successfully
+	fi
+    fi
+
+    if [ ! -f /usr/bin/qemu-${tgtarch}-static ]; then
+	echo qemu-${tgtarch}-static not found
+	exit 1
+    fi
+    if [ ! -f /usr/sbin/debootstrap ]; then
+	echo debootstrap not found
+	exit 1
+    fi
+    if [ $1 != amd64 ] && [ ! -f build/images/$rootfsdir/usr/bin/qemu-${tgtarch}-static ]; then
+        cp /usr/bin/qemu-${tgtarch}-static build/images/$rootfsdir/usr/bin
+    fi
+    if [ ! -f build/images/$rootfsdir/usr/bin/flex-mkdistrorfs ]; then
+	cp tools/flex-mkdistrorfs build/images/$rootfsdir/usr/bin
+    fi
+    if [ ! -f build/images/$rootfsdir/usr/bin/flex-installer ]; then
+	cp tools/flex-installer build/images/$rootfsdir/usr/bin
+    fi
+    if [ -n "$3" ]; then
+	if [ ! -f packages/apt-packages/$3 ]; then
+	    echo packages/apt-packages/$3 not found!
+	    exit 1
+	fi
+	packages_list=packages/apt-packages/$3
+    else
+        packages_list=packages/apt-packages/additional_packages_list_full
+    fi
+    echo additional packages list: $packages_list
+    if [ ! -d build/images/$rootfsdir/usr/aptpkg ]; then
+	mkdir -p build/images/$rootfsdir/usr/aptpkg
+	cp -f $packages_list build/images/$rootfsdir/usr/aptpkg
+	cp -f packages/apt-packages/extrinsic-pkg/*.sh build/images/$rootfsdir/usr/aptpkg
+	if [ -f packages/apt-packages/reconfigpkg.sh ]; then
+	    cp -f packages/apt-packages/reconfigpkg.sh build/images/$rootfsdir/usr/aptpkg
+	fi
+    fi
+    if [ ! -d build/images/$rootfsdir/debootstrap ]; then
+        sudo debootstrap --arch=$1 --foreign $2 build/images/$rootfsdir
+        echo "installing for second-stage ..."
+        DEBIAN_FRONTEND=noninteractive DEBCONF_NONINTERACTIVE_SEEN=true LC_ALL=C LANGUAGE=C LANG=C \
+        sudo chroot build/images/$rootfsdir  /debootstrap/debootstrap  --second-stage
+        echo "configure ... "
+        DEBIAN_FRONTEND=noninteractive DEBCONF_NONINTERACTIVE_SEEN=true LC_ALL=C LANGUAGE=C LANG=C \
+        sudo chroot build/images/$rootfsdir dpkg --configure -a
+    fi
+    touch build/images/$rootfsdir/usr/aptpkg/.firststagedone
+    sudo chroot build/images/$rootfsdir flex-mkdistrorfs $1 $2 $3
+}
+
+
+install_cfg_secondstage() {
+    if [ -f /usr/aptpkg/.rfsblddone ] && [ ! -f /proc/cpuinfo ]; then
+	return
+    fi
+    if [ -n "$3" ]; then
+	packages_list=/usr/aptpkg/$3
+    else
+        packages_list=/usr/aptpkg/additional_packages_list_full
+    fi
+    . $packages_list
+    # set locale
+    if ! grep LANG= /etc/default/locale && [ $2 = xenial ]; then
+	export LC_ALL=en_US.UTF-8
+        echo 'LANG="en_US.UTF-8"' > /etc/default/locale
+        locale-gen en_US.UTF-8
+	dpkg-reconfigure -f noninteractive locales
+    fi
+
+    # set timezone
+    if [ ! -f /etc/timezone ]; then
+        echo "tzdata tzdata/Areas select America" > /tmp/tmptz
+        echo "tzdata tzdata/Zones/America select Chicago" >> /tmp/tmptz
+        debconf-set-selections /tmp/tmptz
+        rm /etc/timezone
+        rm /etc/localtime
+        dpkg-reconfigure -f noninteractive tzdata
+        rm /tmp/tmptz
+    fi
+
+    # create user and passwd
+    if [ ! -d /home/user ]; then
+        useradd -m -d /home/user -s /bin/bash user
+        gpasswd -a user sudo
+        echo -e 'root\nroot\n' | passwd root
+        echo -e 'user\nuser\n' | passwd user
+	mkdir -p /home/user
+	chown -R user:user /home/user
+    fi
+    # set default hostname
+    echo localhost > /etc/hostname
+
+    # set apt sources list to install additional packages
+    asl=/etc/apt/sources.list
+    rm -f $asl
+    if [ $ARCH = "x86_64" -o $ARCH = "i686" ]; then
+	fn=archive; pn=ubuntu;
+    else
+	fn=ports; pn=ubuntu-ports;
+    fi
+    echo deb http://us.$fn.ubuntu.com/$pn/ $2 main restricted >> $asl
+    echo deb-src http://us.$fn.ubuntu.com/$pn/ $2 main restricted >> $asl
+    echo deb http://us.$fn.ubuntu.com/$pn/ $2-updates main restricted >> $asl
+    echo deb-src http://us.$fn.ubuntu.com/$pn/ $2-updates main restricted >> $asl
+    echo deb http://$fn.ubuntu.com/$pn $2-security main restricted >> $asl
+    echo deb-src http://$fn.ubuntu.com/$pn $2-security main restricted >> $asl
+
+    # some packages (e.g. docker, iperf, netperf, etc) need to be installed from universe/multiverse
+    echo deb http://us.$fn.ubuntu.com/$pn/ $2 universe >> $asl
+    echo deb-src http://us.$fn.ubuntu.com/$pn/ $2 universe >> $asl
+    echo deb http://us.$fn.ubuntu.com/$pn/ $2-updates universe >> $asl
+    echo deb-src http://us.$fn.ubuntu.com/$pn/ $2-updates universe >> $asl
+    echo deb http://us.$fn.ubuntu.com/$pn/ $2 multiverse >> $asl
+    echo deb-src http://us.$fn.ubuntu.com/$pn/ $2 multiverse >> $asl
+    echo deb http://us.$fn.ubuntu.com/$pn/ $2-updates multiverse >> $asl
+    echo deb-src http://us.$fn.ubuntu.com/$pn/ $2-updates multiverse >> $asl
+
+    apt-get -y update
+    if ! dpkg-query -W language-pack-en-base 1>/dev/null; then
+	echo installing language-pack-en-base ..
+        apt-get -y install language-pack-en-base
+    fi
+    apt-get -y upgrade
+
+    # install cross toolchain for armhf on aarch64 machine
+    if [ $ARCH = "aarch64" ] && [ -f /usr/bin/qemu-aarch64-static ]; then
+        apt-get -y install crossbuild-essential-armhf gcc-arm-linux-gnueabihf
+    fi
+
+    # Add additional packages for user convenience
+    echo installing additional packages: $additional_packages_list
+    for pkg in $additional_packages_list; do
+	if [ $ARCH != "armv7l" -o $pkg != docker.io ]; then
+	    echo installing $pkg ...
+            apt-get -y install $pkg || true
+	fi
+    done
+    echo "additionally packages installed."
+
+    if [ "$3" != "additional_packages_list_minimal" ]; then
+        #install python lib six depended by building ovs-dpdk locally
+        if ! pip show -q six; then
+	    pip install six;
+        fi
+    fi
+
+    # install extrinsic packages which is needed but not provided yet from official ubuntu
+    echo installing extrinsic packages
+    pkglist=`cd /usr/aptpkg && ls *.sh`
+    for pkg in $pkglist; do
+        pn=${pkg%.*}
+        if [ `echo $extrinsic_packages_list | grep -E $pn` ]; then
+            echo installing $pn ...
+	    /usr/aptpkg/$pkg
+        fi
+    done
+    echo extrinsic packages installed.
+
+    if [ $1 = arm64 ]; then
+	tarch=aarch64-linux-gnu
+    elif [ $1 = armhf ]; then
+	tarch=arm-linux-gnueabihf
+    fi
+    if [ $1 = arm64 -o $1 = armhf ]; then
+	cd /lib/$tarch && ln -sf  ../../usr/lib/$tarch/libxml2.so libxml2.so && \
+	ln -sf ../../usr/lib/$tarch/libpcap.so libpcap.so && \
+	ln -sf ../../usr/lib/$tarch/libnuma.so libnuma.so
+	cd /usr/lib && ln -sf $tarch/libcunit.so libcunit.so
+    fi
+
+    if [ ! -u /usr/bin/sudo ]; then
+	chmod +s /usr/bin/sudo
+    fi
+
+    # some shared libraries locate in /usr/local/lib
+    echo export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/usr/local/lib >> /root/.bashrc
+
+    tmpusr=`ls -t /home | cut -d' ' -f1 | head -1`
+    if [ -d /home/$tmpusr -a "$tmpusr" != "user" ]; then
+	rm -rf /home/$tmpusr
+    fi
+    /usr/aptpkg/reconfigpkg.sh
+    touch /usr/aptpkg/.rfsblddone
+}
+
+gen_distrorfs_firststage $1 $2 $3
+
+if [ $1 = armhf ]; then
+    tarch=arm32
+else
+    tarch=$1
+fi
+if [ -f build/images/${DISTROTYPE}_$2_${tarch}_rootfs.d/usr/aptpkg/.rfsblddone ]; then
+    echo build/images/${DISTROTYPE}_$2_${tarch}_rootfs.d is available!
+    exit
+fi
+
+if [ $ARCH = "aarch64" -o $ARCH = "armv7l" ] && [ ! -f /proc/cpuinfo ]; then
+    install_cfg_secondstage $1 $2 $3
+    distrotimestamp=${DISTROTYPE}_$2_${tarch}_`date +%Y%m%d%H%M`
+    echo $distrotimestamp > /usr/aptpkg/.rfsblddone
+fi

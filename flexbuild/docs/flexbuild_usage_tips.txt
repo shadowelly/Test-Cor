@@ -1,0 +1,48 @@
+Flexbuild Usage Tips
+
+
+For novice users, the following top level command is recommended
+----------------------------------------------------------------------------------------------------------------------------------------
+$ flex-builder -i autobuilder-all                             (for all platforms with all sd/qspi/nor boottype)
+or
+$ flex-builder -i autobuilder-all -m <platform>               (for specific platform with all sd/qspi/nor boottype)
+or
+$ flex-builder -i autobuilder-all -m <platform> -b <boottype> (for specific platform with specific boottype)
+
+The autobuilder-all command will automatically build various component repo according to the repo tag/commit/branch info
+specified in configs/build_lsdk.cfg and generate all depolyable composite images: firmware_<platform>_uboot_<boottype>.img,
+bootpartition_<arch>_lts_4.x_<timestamp>.tgz and ubuntu_xenial_arm64_rootfs_<timestamp>.tgz
+Option '-a arm64 -j 16' can be omitted for all arm64 platforms, '-a arm32' must be specified when building for arm32 platforms
+
+
+For experienced developers, the following separate commands can be used 
+----------------------------------------------------------------------------------------------------------------------------------------
+1. First, according to the actual use case, users can customize different components from default component repo as below:
+   - enter concerned component repository (e.g. cd packages/firmware/u-boot, cd packages/linux/linux repo, cd packages/apps/dpdk, etc)
+   - select disired git branch/commit/tag as needed, optionally
+   - apply custom patch as needed, optionally
+   - manually modify source code as needed, optionally
+
+2. Then, run desired flex-builder command as needed, for example:
+   $ flex-builder distclean                            #clean all previously generated images except distro rootfs, optionally
+   $ flex-builder -i mkfw -m ls1046ardb -b sd -B uboot #generate deployable composite firmware firmware_ls1046ardb_uboot_sdboot.img
+   $ flex-builder -i mkfw -m ls1043ardb -b nor -B uefi #generate deployable composite firmware firmware_ls1043ardb_uefi_norboot.img
+   $ flex-builder -i mkbootpartition                   #generate deployable bootpartition_arm64_lts_<version>_<timestamp>.tgz
+   $ flex-builder -i mkitb                             #generate flex_linux_arm64.itb used for all arm64 platforms 
+
+   Generally, the following build sequency of separate commands is recommended (take arm64 ls1046ardb for example):
+   1. flex-builder distclean
+   2. flex-builder -c linux
+   3. flex-builder -i mkrfs            (can be omitted if ubuntu_xenial_arm64_rootfs.d had already been generated)
+   4. flex-builder -i mkfw -m ls1046ardb -b sd -B uboot
+   5. flex-builder -i mkbootpartition
+   6. flex-builder -c apps             (can be omitted if previously generated apps components exist and no any update to source)
+   7. flex-builder -i merge-component  (merge components into target rootfs)
+   8. flex-builder -i compressrfs      (optionally)
+
+3. Finally, install distro images to SD/USB/SATA storage mediai, for example:
+   $ cd build/images
+   $ flex-installer -b bootpartition_arm64_xx.tgz -r ubuntu_xenial_arm64_rootfs_xx.tgz -m ls1046ardb -d /dev/sdx
+   or
+   $ flex-installer -b bootpartition_arm64_lts_4.9 -r ubuntu_xenial_arm64_rootfs.d -d /dev/sdx
+   When U-Boot is used as bootloader, option '-m <machine>' can be omitted, which is needed only when UEFI is used as bootloader.

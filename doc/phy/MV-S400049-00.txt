@@ -1,0 +1,29 @@
+|************************************************************************
+|     ___.  ___.
+|    / . | / . |
+|   / /|=|/ /|=|     Datasheet Readme
+|  /_/ |___/ |_|
+|  M A R V E L L
+|
+|  MARVELL SEMICONDUCTOR, INC.
+|  Doc. No. MV-S400049-00  Rev. --
+|  
+|************************************************************************
+
+Thank you for choosing Marvell PHY products.
+
+One of the most important document is the datasheet, but so are its supporting documents to be aware of.
+
+
+The datasheet should be read together with the following documents:
+
+1) Release notes: There is a release notes for every revision of silicon. Specific to the silicon revision, it contains an errata section which describe known bugs. It also contains a customer information section to clarify things that are not necessarily bugs.
+
+
+2) Datasheet Update Document (if applicable): 
+If there are any new important changes discovered after the release of the present datasheet, it will be listed here.
+
+3) Datasheet Change History Document (if applicable): 
+This shows the changes from the previous datasheet revision to the present datasheet revision.
+
+
